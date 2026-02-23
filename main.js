@@ -10,8 +10,21 @@ let comets = [];
 let particles = [];
 let mode = 'planet'; // 'planet' or 'comet' or 'edit'
 let showOrbits = true;
+let simulationSpeed = 1;
 let selectedObject = null;
 let selectedType = null;
+
+// Zoom configuration
+const zoomLevels = [1, 0.5, 0.25];
+let zoomIndex = 0;
+
+function getMousePos(clientX, clientY) {
+  const zoom = zoomLevels[zoomIndex];
+  return {
+    x: (clientX - canvas.width / 2) / zoom + canvas.width / 2,
+    y: (clientY - canvas.height / 2) / zoom + canvas.height / 2
+  };
+}
 
 // UI Elements
 const btnPlanet = document.getElementById('btnPlanet');
@@ -30,6 +43,11 @@ const editActions = document.getElementById('editActions');
 const chkPermanentOrbits = document.getElementById('chkPermanentOrbits');
 const chkCollisions = document.getElementById('chkCollisions');
 const cometControlGroup = document.getElementById('cometControlGroup');
+const editControlGroup = document.getElementById('editControlGroup');
+const chkShowMass = document.getElementById('chkShowMass');
+const btnSpeed1 = document.getElementById('btnSpeed1');
+const btnSpeed5 = document.getElementById('btnSpeed5');
+const btnSpeed20 = document.getElementById('btnSpeed20');
 
 // Resize canvas to fill window
 function resize() {
@@ -49,7 +67,9 @@ btnPlanet.addEventListener('click', () => {
   selectedType = null;
   editActions.style.display = 'none';
   cometControlGroup.style.display = 'none';
+  editControlGroup.style.display = 'none';
   massControlGroup.style.display = 'flex';
+  btnClear.style.display = 'none';
   instructionText.innerHTML = "<b>Planet Mode:</b> Click anywhere to place a Planet.";
 });
 
@@ -62,7 +82,9 @@ btnComet.addEventListener('click', () => {
   selectedType = null;
   editActions.style.display = 'none';
   cometControlGroup.style.display = 'flex'; // Show comet controls only here
+  editControlGroup.style.display = 'none';
   massControlGroup.style.display = 'none';
+  btnClear.style.display = 'none';
   instructionText.innerHTML = "<b>Comet Mode:</b> Click and drag to shoot a comet. Longer drag = higher speed.";
 });
 
@@ -75,7 +97,9 @@ btnEdit.addEventListener('click', () => {
   selectedType = null;
   editActions.style.display = 'none';
   cometControlGroup.style.display = 'none';
+  editControlGroup.style.display = 'flex';
   massControlGroup.style.display = 'flex'; // Default show for instructions
+  btnClear.style.display = 'block';
   instructionText.innerHTML = "<b>Edit Mode:</b> Click an object to select it, change mass, or delete it.";
 });
 
@@ -118,6 +142,18 @@ btnDelete.addEventListener('click', () => {
   editActions.style.display = 'none';
   massControlGroup.style.display = 'none';
 });
+
+function setSpeed(speed, activeBtn) {
+  simulationSpeed = speed;
+  btnSpeed1.classList.remove('active');
+  btnSpeed5.classList.remove('active');
+  btnSpeed20.classList.remove('active');
+  activeBtn.classList.add('active');
+}
+
+btnSpeed1.addEventListener('click', () => setSpeed(1, btnSpeed1));
+btnSpeed5.addEventListener('click', () => setSpeed(5, btnSpeed5));
+btnSpeed20.addEventListener('click', () => setSpeed(20, btnSpeed20));
 
 class Particle {
   constructor(x, y, vx, vy, color) {
@@ -179,6 +215,15 @@ class Planet {
     ctx.fill();
     ctx.shadowBlur = 0; // reset
 
+    // Draw mass text
+    if (chkShowMass && chkShowMass.checked && mode === 'edit') {
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '600 12px Inter';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(this.mass, this.x, this.y);
+    }
+
     // Highlight if selected
     if (this === selectedObject) {
       ctx.beginPath();
@@ -205,19 +250,14 @@ class Comet {
     // Calculate gravitational influence from all planets
     let ax = 0;
     let ay = 0;
+    const lastX = this.x;
+    const lastY = this.y;
 
     for (const p of planets) {
       const dx = p.x - this.x;
       const dy = p.y - this.y;
       const distSq = dx * dx + dy * dy;
       const dist = Math.sqrt(distSq);
-
-      // Collision roughly, basic logic (stick to planet or vanish, here let's make them vanish if they hit)
-      if (chkCollisions.checked && dist < p.radius) {
-        this.dead = true;
-        createExplosion(this.x, this.y, 15, this.color);
-        return;
-      }
 
       // F = G * M / r^2 (simplified, m of comet is 1 so F = a)
       const force = (G * p.mass) / (distSq + 1); // +1 to prevent singularity
@@ -233,6 +273,26 @@ class Comet {
     this.vy += ay;
     this.x += this.vx;
     this.y += this.vy;
+
+    // Check collision with planets (continuous to prevent tunneling on small planets)
+    for (const p of planets) {
+      const l2 = this.vx * this.vx + this.vy * this.vy;
+      let t = 0;
+      if (l2 > 0) {
+        t = ((p.x - lastX) * this.vx + (p.y - lastY) * this.vy) / l2;
+        t = Math.max(0, Math.min(1, t));
+      }
+      const projX = lastX + t * this.vx;
+      const projY = lastY + t * this.vy;
+      const dxObj = p.x - projX;
+      const dyObj = p.y - projY;
+
+      if (dxObj * dxObj + dyObj * dyObj <= p.radius * p.radius) {
+        this.dead = true;
+        createExplosion(projX, projY, 15, this.color);
+        return;
+      }
+    }
 
     // Collisions with other comets
     if (chkCollisions.checked) {
@@ -311,16 +371,20 @@ let currentMouseX = 0;
 let currentMouseY = 0;
 
 function handlePointerDown(clientX, clientY) {
+  const pos = getMousePos(clientX, clientY);
+  const wx = pos.x;
+  const wy = pos.y;
+
   if (mode === 'planet') {
     const mass = parseFloat(massInput.value);
     const radius = parseFloat(radiusInput.value);
-    planets.push(new Planet(clientX, clientY, mass, radius));
+    planets.push(new Planet(wx, wy, mass, radius));
   } else if (mode === 'comet') {
     isDragging = true;
-    dragStartX = clientX;
-    dragStartY = clientY;
-    currentMouseX = clientX;
-    currentMouseY = clientY;
+    dragStartX = wx;
+    dragStartY = wy;
+    currentMouseX = wx;
+    currentMouseY = wy;
   } else if (mode === 'edit') {
     selectedObject = null;
     selectedType = null;
@@ -330,9 +394,9 @@ function handlePointerDown(clientX, clientY) {
 
     // Check comets first (since they are smaller, might be drawn on top conceptually)
     for (const c of comets) {
-      const dx = c.x - clientX;
-      const dy = c.y - clientY;
-      if (Math.sqrt(dx * dx + dy * dy) <= c.radius + 15) { // slightly larger margin for fingers
+      const dx = c.x - wx;
+      const dy = c.y - wy;
+      if (Math.sqrt(dx * dx + dy * dy) <= c.radius + 15 / zoomLevels[zoomIndex]) { // scale hit margin with zoom
         selectedObject = c;
         selectedType = 'comet';
         cometControlGroup.style.display = 'flex';
@@ -343,9 +407,9 @@ function handlePointerDown(clientX, clientY) {
 
     // Check planets
     for (const p of planets) {
-      const dx = p.x - clientX;
-      const dy = p.y - clientY;
-      if (Math.sqrt(dx * dx + dy * dy) <= p.radius + 15) { // slightly larger margin for fingers
+      const dx = p.x - wx;
+      const dy = p.y - wy;
+      if (Math.sqrt(dx * dx + dy * dy) <= p.radius + 15 / zoomLevels[zoomIndex]) {
         selectedObject = p;
         selectedType = 'planet';
         massControlGroup.style.display = 'flex';
@@ -361,16 +425,18 @@ function handlePointerDown(clientX, clientY) {
 }
 
 function handlePointerMove(clientX, clientY) {
-  currentMouseX = clientX;
-  currentMouseY = clientY;
+  const pos = getMousePos(clientX, clientY);
+  currentMouseX = pos.x;
+  currentMouseY = pos.y;
 }
 
 function handlePointerUp(clientX, clientY) {
   if (mode === 'comet' && isDragging) {
+    const pos = getMousePos(clientX, clientY);
     isDragging = false;
     // Calculate velocity based on drag vector (inverted logic like a slingshot)
-    const dx = dragStartX - clientX;
-    const dy = dragStartY - clientY;
+    const dx = dragStartX - pos.x;
+    const dy = dragStartY - pos.y;
     const vx = dx * 0.05; // Scaling factor
     const vy = dy * 0.05;
 
@@ -379,6 +445,16 @@ function handlePointerUp(clientX, clientY) {
 }
 
 // Mouse events
+canvas.addEventListener('wheel', (e) => {
+  if (e.deltaY > 0) {
+    // Zoom out
+    zoomIndex = Math.min(zoomLevels.length - 1, zoomIndex + 1);
+  } else {
+    // Zoom in
+    zoomIndex = Math.max(0, zoomIndex - 1);
+  }
+});
+
 canvas.addEventListener('mousedown', (e) => handlePointerDown(e.clientX, e.clientY));
 canvas.addEventListener('mousemove', (e) => handlePointerMove(e.clientX, e.clientY));
 canvas.addEventListener('mouseup', (e) => handlePointerUp(e.clientX, e.clientY));
@@ -406,8 +482,35 @@ canvas.addEventListener('touchend', (e) => {
 }, { passive: false });
 
 function loop() {
+  // Simulation updates (fast forward support)
+  for (let s = 0; s < simulationSpeed; s++) {
+    // Update comets
+    for (let i = comets.length - 1; i >= 0; i--) {
+      let c = comets[i];
+      c.update();
+      if (c.dead) {
+        comets.splice(i, 1);
+      }
+    }
+
+    // Update particles
+    for (let i = particles.length - 1; i >= 0; i--) {
+      let p = particles[i];
+      p.update();
+      if (p.life <= 0) {
+        particles.splice(i, 1);
+      }
+    }
+  }
+
   // Clear canvas
   ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  const zoom = zoomLevels[zoomIndex];
+  ctx.save();
+  ctx.translate(canvas.width / 2, canvas.height / 2);
+  ctx.scale(zoom, zoom);
+  ctx.translate(-canvas.width / 2, -canvas.height / 2);
 
   // Draw planets
   for (const p of planets) {
@@ -444,6 +547,8 @@ function loop() {
       for (let step = 0; step < MAX_PREVIEW_STEPS; step++) {
         let ax = 0;
         let ay = 0;
+        let lastSimX = simX;
+        let lastSimY = simY;
 
         for (const p of planets) {
           const pdx = p.x - simX;
@@ -451,27 +556,40 @@ function loop() {
           const distSq = pdx * pdx + pdy * pdy;
           const dist = Math.sqrt(distSq);
 
-          if (dist < p.radius) {
-            isDead = true;
-            break;
-          }
-
           const force = (G * p.mass) / (distSq + 1);
           ax += (pdx / dist) * force;
           ay += (pdy / dist) * force;
         }
-
-        if (isDead) break;
 
         simVx += ax;
         simVy += ay;
         simX += simVx;
         simY += simVy;
 
+        for (const p of planets) {
+          const l2 = simVx * simVx + simVy * simVy;
+          let t = 0;
+          if (l2 > 0) {
+            t = ((p.x - lastSimX) * simVx + (p.y - lastSimY) * simVy) / l2;
+            t = Math.max(0, Math.min(1, t));
+          }
+          const projX = lastSimX + t * simVx;
+          const projY = lastSimY + t * simVy;
+          const dxObj = p.x - projX;
+          const dyObj = p.y - projY;
+
+          if (dxObj * dxObj + dyObj * dyObj <= p.radius * p.radius) {
+            isDead = true;
+            break;
+          }
+        }
+
+        if (isDead) break;
+
         ctx.lineTo(simX, simY);
 
         // Optimization: stop drawing if the comet leaves the screen far away
-        if (simX < -2000 || simX > canvas.width + 2000 || simY < -2000 || simY > canvas.height + 2000) {
+        if (simX < -15000 || simX > canvas.width + 15000 || simY < -15000 || simY > canvas.height + 15000) {
           break;
         }
       }
@@ -482,27 +600,17 @@ function loop() {
     }
   }
 
-  // Update and draw comets
+  // Draw comets
   for (let i = comets.length - 1; i >= 0; i--) {
-    let c = comets[i];
-    c.update();
-    if (c.dead) {
-      comets.splice(i, 1);
-    } else {
-      c.draw(ctx);
-    }
+    comets[i].draw(ctx);
   }
 
-  // Update and draw particles
+  // Draw particles
   for (let i = particles.length - 1; i >= 0; i--) {
-    let p = particles[i];
-    p.update();
-    if (p.life <= 0) {
-      particles.splice(i, 1);
-    } else {
-      p.draw(ctx);
-    }
+    particles[i].draw(ctx);
   }
+
+  ctx.restore();
 
   requestAnimationFrame(loop);
 }

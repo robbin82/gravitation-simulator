@@ -38,7 +38,7 @@
 
     <div class="control-actions">
       <button id="btnToggleOrbits" class="action-btn">Hide Orbits</button>
-      <button id="btnClear" class="action-btn danger">Clear Space</button>
+      <button id="btnClear" class="action-btn danger" style="display: none;">Clear Space</button>
     </div>
     <div class="control-group" id="cometControlGroup"
       style="display: none; margin-top: 10px; flex-direction: column; gap: 8px;">
@@ -51,6 +51,22 @@
         <input type="checkbox" id="chkCollisions" checked
           style="width: auto; cursor: pointer; accent-color: #fc5185; transform: scale(1.2);">
         <label for="chkCollisions" style="margin: 0; cursor: pointer;">Enable Collisions</label>
+      </div>
+    </div>
+    <div class="control-group" id="editControlGroup"
+      style="display: none; margin-top: 10px; flex-direction: column; gap: 16px;">
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <input type="checkbox" id="chkShowMass" checked
+          style="width: auto; cursor: pointer; accent-color: #00b4d8; transform: scale(1.2);">
+        <label for="chkShowMass" style="margin: 0; cursor: pointer;">Show Planet Mass</label>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 8px;">
+        <label>Simulation Speed (Fast Forward):</label>
+        <div class="toggle-group">
+          <button id="btnSpeed1" class="active">1x</button>
+          <button id="btnSpeed5">5x</button>
+          <button id="btnSpeed20">20x</button>
+        </div>
       </div>
     </div>
     <div class="control-actions" id="editActions" style="display: none; margin-top: 10px;">
